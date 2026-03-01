@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Registry (MySQL + Express)</title>
+ <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Auth Section -->
+    <div id="authSection">
+      <h2>Student Registry System</h2>
+      <div class="auth-tabs">
+        <button class="tab-btn active" onclick="switchTab('login')">Login</button>
+        <button class="tab-btn" onclick="switchTab('register')">Register</button>
+      </div>
+      
+      <!-- Login Tab -->
+      <div id="loginTab" class="tab active">
+        <div class="auth-section">
+          <h3>Admin Login</h3>
+          <div class="form-group">
+            <input type="email" id="loginEmail" placeholder="Email">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button class="btn-login" onclick="login()">Login</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Register Tab -->
+      <div id="registerTab" class="tab">
+        <div class="auth-section">
+          <h3>Create Admin Account</h3>
+          <div class="form-group">
+            <input type="text" id="regName" placeholder="Full Name">
+            <input type="email" id="regEmail" placeholder="Email">
+            <input type="password" id="regPassword" placeholder="Password">
+            <button class="btn-register" onclick="register()">Register</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="statusMsg" class="status hidden"></div>
+    </div>
+
+    <!-- Students Section (hidden until logged in) -->
+    <div id="studentsSection" class="hidden">
+      <button type="button" class="btn-logout btn-logout-float" onclick="logout()">Logout</button>
+      <h2>Student Registry</h2>
+      <div class="form-group">
+        <input type="hidden" id="studentId">
+        <input type="text" id="name" placeholder="Full Name">
+        <input type="email" id="email" placeholder="Email Address">
+        <button id="mainBtn" class="btn-add" onclick="saveStudent()">Add Student</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="studentTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:5000';
+    let token = localStorage.getItem('token');
+    let userRole = localStorage.getItem('role');
+
+    // Auto-login if token exists
+    if (token && userRole === 'admin') {
+      document.getElementById('authSection').classList.add('hidden');
+      document.getElementById('studentsSection').classList.remove('hidden');
+      loadStudents();
+    }
+
+    function switchTab(tabName) {
+      // Hide all tabs
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      
+      // Show selected tab
+      document.getElementById(tabName + 'Tab').classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    async function register() {
+      const name = document.getElementById('regName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+
+      if (!name || !email || !password || password.length < 6) {
+        showStatus('Please fill all fields. Password must be 6+ characters.', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role: 'admin' })
+        });
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error);
+        
+        showStatus('Registration successful! Please login.', 'success');
+        document.getElementById('regName').value = '';
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regPassword').value = '';
+        switchTab('login');
+      } catch (error) {
+        showStatus(error.message, 'error');
+      }
+    }
+
+    async function login() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+
+      if (!email || !password) {
+        showStatus('Please enter email and password.', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.error);
+        
+        token = data.token;
+        userRole = data.role;
+        localStorage.setItem('token', token);
+        localStorage.setItem('role', userRole);
+        
+        showStatus('Login successful!', 'success');
+        setTimeout(() => {
+          document.getElementById('authSection').classList.add('hidden');
+          document.getElementById('studentsSection').classList.remove('hidden');
+          loadStudents();
+        }, 1000);
+      } catch (error) {
+        showStatus(error.message, 'error');
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      token = null;
+      userRole = null;
+      document.getElementById('authSection').classList.remove('hidden');
+      document.getElementById('studentsSection').classList.add('hidden');
+      document.querySelector('.tab-btn.active').click(); // Reset to login tab
+      clearForm();
+      showStatus('Logged out successfully.', 'success');
+    }
+
+    function showStatus(message, type) {
+      const status = document.getElementById('statusMsg');
+      status.textContent = message;
+      status.className = `status ${type}`;
+      status.classList.remove('hidden');
+      setTimeout(() => status.classList.add('hidden'), 5000);
+    }
+
+    // Students CRUD functions (with auth headers)
+    async function loadStudents() {
+      try {
+        const response = await fetch(`${API_URL}/students`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "content-type": "application/json",
+          }
+        });
+        const students = await response.json();
+        const tableBody = document.getElementById('studentTableBody');
+        tableBody.innerHTML = '';
+
+        students.forEach(student => {
+          tableBody.innerHTML += `
+            <tr>
+              <td>${student.id}</td>
+              <td>${student.name}</td>
+              <td>${student.email}</td>
+              <td>
+                <button class="btn-update" onclick="editStudent(${student.id}, '${student.name.replace(/'/g, "\\'")}', '${student.email.replace(/'/g, "\\'")}')">Edit</button>
+                <button class="btn-delete" onclick="deleteStudent(${student.id})">Delete</button>
+              </td>
+            </tr>
+          `;
+        });
+      } catch (error) {
+        console.error('Error loading students:', error);
+        showStatus('Error loading students. Check console.', 'error');
+      }
+    }
+
+    async function saveStudent() {
+      const studentId = document.getElementById('studentId').value;
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+
+      if (!name || !email) {
+        showStatus('Please fill name and email.', 'error');
+        return;
+      }
+
+      const method = studentId ? 'PUT' : 'POST';
+      const url = studentId ? `${API_URL}/students/${studentId}` : `${API_URL}/students`;
+
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ name, email })
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to save');
+        }
+        
+        clearForm();
+        loadStudents();
+        showStatus('Student saved successfully!', 'success');
+      } catch (error) {
+        showStatus(error.message, 'error');
+      }
+    }
+
+    async function deleteStudent(id) {
+      if (!confirm('Are you sure?')) return;
+      
+      try {
+        const response = await fetch(`${API_URL}/students/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Delete failed');
+        }
+        
+        loadStudents();
+        showStatus('Student deleted.', 'success');
+      } catch (error) {
+        showStatus(error.message, 'error');
+      }
+    }
+
+    function editStudent(id, name, email) {
+      document.getElementById('studentId').value = id;
+      document.getElementById('name').value = name;
+      document.getElementById('email').value = email;
+      document.getElementById('mainBtn').textContent = 'Update Student';
+      document.getElementById('mainBtn').className = 'btn-update';
+    }
+
+    function clearForm() {
+      document.getElementById('studentId').value = '';
+      document.getElementById('name').value = '';
+      document.getElementById('email').value = '';
+      document.getElementById('mainBtn').textContent = 'Add Student';
+      document.getElementById('mainBtn').className = 'btn-add';
+    }
+  </script>
+</body>
+</html>
